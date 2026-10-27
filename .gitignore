@@ -1,0 +1,36 @@
+# Python & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtuelle Umgebungen
+venv/
+.venv/
+env/
+ENV/
+
+# Logs & temporäre Laufzeitdaten
+*.log
+*.sqlite3
+*.tmp
+
+# Projekt-Workspace & Testordner
+Tester123/
+test.txt
+server_health.py
+scratch/
+
+# Lokale IDEs & Betriebssystem
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Umgebungs- und Secrets-Dateien
+.env
+.env.*
+secrets.json
