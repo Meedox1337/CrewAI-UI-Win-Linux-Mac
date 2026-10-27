@@ -587,14 +587,19 @@ class CrewRunner:
                     else:
                         on_log(f"Agent '{role}' im Read-Only-Modus aktiv", "INFO")
 
-                # LLM via Ollama anbinden mit dynamischem Kontextfenster (num_ctx) und Timeout-Schutz
+                # LLM via Ollama anbinden mit dynamischem Kontextfenster (num_ctx via extra_body) und Timeout-Schutz
+                ollama_base = self.ollama_host.rstrip("/")
+                v1_url = f"{ollama_base}/v1" if not ollama_base.endswith("/v1") else ollama_base
+
                 llm = LLM(
                     model=f"ollama/{model_name}",
-                    base_url=self.ollama_host,
+                    base_url=v1_url,
                     temperature=0.2,
                     timeout=180,
-                    num_ctx=pipeline_max_tokens,
-                    options={"num_ctx": pipeline_max_tokens},
+                    extra_body={
+                        "num_ctx": pipeline_max_tokens,
+                        "options": {"num_ctx": pipeline_max_tokens},
+                    },
                 )
 
                 # Step-Callback für diesen spezifischen Agenten

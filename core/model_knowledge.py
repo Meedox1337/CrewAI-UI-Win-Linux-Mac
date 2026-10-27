@@ -580,4 +580,80 @@ def get_role_recommendation_badge(model_name: str, host: str = "http://localhost
         }
 
 
+def evaluate_vram_status(
+    model_size_gb: float,
+    gpu_vram_gb: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Evaluates whether a model fits into dedicated physical GPU VRAM.
+    MUST strictly evaluate against physical GPU VRAM (via NVML), NEVER against system RAM.
+
+    Evaluation criteria:
+    - GREEN: (model_size_gb + 2.5 GB headroom) <= gpu_vram_gb (Model fits completely in GPU VRAM).
+    - YELLOW: model_size_gb <= gpu_vram_gb, but headroom is tight (< 1.5 GB free).
+    - RED: model_size_gb > gpu_vram_gb (Model exceeds physical VRAM; requires slow CPU offloading or crashes).
+
+    Returns:
+        Dictionary with status ('green', 'yellow', 'red'), label text, bg, fg, border, and tooltip.
+    """
+    if gpu_vram_gb is None:
+        try:
+            from core.system_monitor import get_gpu_vram_gb
+            gpu_vram_gb = get_gpu_vram_gb()
+        except Exception:
+            gpu_vram_gb = None
+
+    if gpu_vram_gb is None or gpu_vram_gb <= 0:
+        return {
+            "status": "red",
+            "text": "⚠️ Kein GPU-VRAM",
+            "bg": "#450a0a",
+            "fg": "#fca5a5",
+            "border": "#dc2626",
+            "tooltip": "Keine dedizierte GPU via NVML erkannt. Modell muss über CPU/RAM offloaded werden.",
+        }
+
+    headroom = gpu_vram_gb - model_size_gb
+
+    if model_size_gb > gpu_vram_gb:
+        # RED: Exceeds physical VRAM (e.g. 20GB on 12GB GPU like RTX 4070)
+        return {
+            "status": "red",
+            "text": f"🔴 Zu groß (~{model_size_gb:.1f}G/{gpu_vram_gb:.0f}G)",
+            "bg": "#450a0a",
+            "fg": "#fca5a5",
+            "border": "#ef4444",
+            "tooltip": (
+                f"Modell (~{model_size_gb:.1f} GB) überschreitet den physischen GPU-VRAM ({gpu_vram_gb:.1f} GB)! "
+                "Erfordert langsames CPU-Offloading oder stürzt mit CUDA Out of Memory ab."
+            ),
+        }
+    elif headroom < 1.5 or (model_size_gb + 2.5) > gpu_vram_gb:
+        # YELLOW: Model fits into VRAM, but headroom is tight (< 1.5 GB free)
+        return {
+            "status": "yellow",
+            "text": f"🟡 Knapp (~{model_size_gb:.1f}G/{gpu_vram_gb:.0f}G)",
+            "bg": "#422006",
+            "fg": "#fde047",
+            "border": "#eab308",
+            "tooltip": (
+                f"Modell (~{model_size_gb:.1f} GB) passt in VRAM ({gpu_vram_gb:.1f} GB), "
+                f"aber Headroom ist sehr knapp ({headroom:.1f} GB frei). Große Kontextfenster könnten Speicher überbelegen."
+            ),
+        }
+    else:
+        # GREEN: Fits comfortably in VRAM with >= 2.5 GB headroom
+        return {
+            "status": "green",
+            "text": f"🟢 Passt (~{model_size_gb:.1f}G/{gpu_vram_gb:.0f}G)",
+            "bg": "#052e16",
+            "fg": "#86efac",
+            "border": "#22c55e",
+            "tooltip": (
+                f"Modell (~{model_size_gb:.1f} GB) passt optimal in den GPU-VRAM ({gpu_vram_gb:.1f} GB) "
+                f"mit komfortablem Puffer ({headroom:.1f} GB frei für KV-Cache)."
+            ),
+        }
+
+
 

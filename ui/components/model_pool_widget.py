@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 from core.locales import t
 from core.model_knowledge import (
     estimate_model_vram_gb,
+    evaluate_vram_status,
     get_capability_badge,
     get_role_recommendation_badge,
 )
@@ -173,6 +174,12 @@ class ModelPoolWidget(QFrame):
 
         self.installed_models: List[Dict[str, Any]] = []
         self._model_rows: Dict[str, Dict[str, Any]] = {}
+        self.gpu_vram_gb: Optional[float] = None
+        try:
+            from core.system_monitor import get_gpu_vram_gb
+            self.gpu_vram_gb = get_gpu_vram_gb()
+        except Exception:
+            self.gpu_vram_gb = None
         self._update_check_worker: Optional[ModelUpdateCheckWorker] = None
         self._active_pull_workers: List[SingleModelPullWorker] = []
         self.is_pulling: bool = False
@@ -293,9 +300,9 @@ class ModelPoolWidget(QFrame):
         self.lbl_hdr_size.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold;")
         legend_layout.addWidget(self.lbl_hdr_size)
 
-        # Spalte 3: VRAM-Bedarf (~110px, zentriert)
-        self.lbl_hdr_vram = QLabel("VRAM-Bedarf" if self.lang == "de" else "VRAM Est.")
-        self.lbl_hdr_vram.setFixedWidth(110)
+        # Spalte 4: VRAM-Status (~130px, zentriert)
+        self.lbl_hdr_vram = QLabel("VRAM-Status" if self.lang == "de" else "VRAM Status")
+        self.lbl_hdr_vram.setFixedWidth(130)
         self.lbl_hdr_vram.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_hdr_vram.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold;")
         legend_layout.addWidget(self.lbl_hdr_vram)
@@ -428,14 +435,19 @@ class ModelPoolWidget(QFrame):
                 lbl_size.setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold;")
                 r_layout.addWidget(lbl_size)
 
-                # Spalte 4: VRAM-Bedarf (feste Breite ~110px, zentriert)
-                lbl_vram = QLabel(f"~{vram_gb:.1f} GB VRAM")
-                lbl_vram.setFixedWidth(110)
+                # Spalte 4: VRAM-Status (feste Breite ~130px, zentriert)
+                eff_size = float(size_gb) if size_gb and float(size_gb) > 0 else vram_gb
+                vram_status = evaluate_vram_status(eff_size, self.gpu_vram_gb)
+
+                lbl_vram = QLabel(vram_status["text"])
+                lbl_vram.setFixedWidth(130)
                 lbl_vram.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 lbl_vram.setStyleSheet(
-                    "background-color: #0f172a; color: #38bdf8; font-size: 10px; "
-                    "padding: 2px 4px; border-radius: 3px; font-weight: bold;"
+                    f"background-color: {vram_status['bg']}; color: {vram_status['fg']}; "
+                    f"border: 1px solid {vram_status['border']}; border-radius: 3px; "
+                    f"padding: 2px 4px; font-size: 10px; font-weight: bold;"
                 )
+                lbl_vram.setToolTip(vram_status["tooltip"])
                 r_layout.addWidget(lbl_vram)
 
                 # Spalte 5: Primäre Fähigkeit (feste Breite ~120px, zentriert)
@@ -789,12 +801,40 @@ class ModelPoolWidget(QFrame):
         self.lbl_hdr_name.setText("Modellname" if self.lang == "de" else "Model Name")
         self.lbl_hdr_update.setText("Update-Status" if self.lang == "de" else "Update Status")
         self.lbl_hdr_size.setText("Größe" if self.lang == "de" else "Size")
-        self.lbl_hdr_vram.setText("VRAM-Bedarf" if self.lang == "de" else "VRAM Est.")
+        self.lbl_hdr_vram.setText("VRAM-Status" if self.lang == "de" else "VRAM Status")
         self.lbl_hdr_cap.setText("Fähigkeiten" if self.lang == "de" else "Capabilities")
         self.lbl_hdr_role.setText("Empfohlene Rolle" if self.lang == "de" else "Recommended Role")
         self.lbl_hdr_action.setText("Aktion" if self.lang == "de" else "Action")
 
         self.populate_model_pool(self.installed_models)
+
+    def set_gpu_vram(self, vram_total_gb: Optional[float]) -> None:
+        """
+        Updates physical GPU VRAM and refreshes all model VRAM status badges.
+        Only re-evaluates if VRAM total changed.
+        """
+        if vram_total_gb is not None and vram_total_gb > 0:
+            if self.gpu_vram_gb != vram_total_gb:
+                self.gpu_vram_gb = vram_total_gb
+                self._update_all_vram_badges()
+
+    def _update_all_vram_badges(self) -> None:
+        """Refreshes VRAM status badges for all active model rows."""
+        for name, data in self._model_rows.items():
+            lbl_vram = data.get("lbl_vram")
+            model = data.get("model", {})
+            if lbl_vram and model:
+                size_gb = float(model.get("size_gb", 0.0))
+                vram_gb = estimate_model_vram_gb(name)
+                eff_size = size_gb if size_gb > 0 else vram_gb
+                vram_status = evaluate_vram_status(eff_size, self.gpu_vram_gb)
+                lbl_vram.setText(vram_status["text"])
+                lbl_vram.setStyleSheet(
+                    f"background-color: {vram_status['bg']}; color: {vram_status['fg']}; "
+                    f"border: 1px solid {vram_status['border']}; border-radius: 3px; "
+                    f"padding: 2px 4px; font-size: 10px; font-weight: bold;"
+                )
+                lbl_vram.setToolTip(vram_status["tooltip"])
 
     def stop(self) -> None:
         """Terminates active pull, check, and list threads cleanly."""

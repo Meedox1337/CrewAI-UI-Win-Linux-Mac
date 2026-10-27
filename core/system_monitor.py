@@ -13,13 +13,25 @@ from typing import Any, Dict, Optional
 import psutil
 from PyQt6.QtCore import QThread, pyqtSignal
 
-# Safe, crash-resilient import of pynvml (NVIDIA Management Library)
-try:
-    import pynvml
-    PYNVML_AVAILABLE = True
-except (ImportError, Exception):
-    pynvml = None  # type: ignore
-    PYNVML_AVAILABLE = False
+import warnings
+
+# Safe, crash-resilient import of pynvml / nvidia-ml-py (NVIDIA Management Library)
+# Suppress FutureWarning from deprecated pynvml package
+PYNVML_AVAILABLE = False
+pynvml = None
+
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    try:
+        import nvidia_smi as pynvml  # type: ignore
+        PYNVML_AVAILABLE = True
+    except (ImportError, Exception):
+        try:
+            import pynvml  # type: ignore
+            PYNVML_AVAILABLE = True
+        except (ImportError, Exception):
+            pynvml = None
+            PYNVML_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -136,9 +148,24 @@ class SystemMonitor:
             "is_gpu": False,
         }
 
+    def get_memory_info(self) -> Dict[str, Any]:
+        """Alias for get_memory_status."""
+        return self.get_memory_status()
+
+    def get_gpu_vram_gb(self) -> Optional[float]:
+        """
+        Returns dedicated physical GPU VRAM in GB.
+        Returns None if no dedicated GPU (NVML or Apple Silicon) is available.
+        NEVER returns Host System-RAM.
+        """
+        info = self.get_memory_status()
+        if info.get("is_gpu"):
+            return float(info.get("total_gb", 0.0))
+        return None
+
     def shutdown(self) -> None:
         """Releases NVML driver handles safely."""
-        if self.nvml_initialized and PYNVML_AVAILABLE:
+        if self.nvml_initialized and PYNVML_AVAILABLE and pynvml is not None:
             try:
                 pynvml.nvmlShutdown()
             except Exception:
@@ -146,17 +173,28 @@ class SystemMonitor:
             self.nvml_initialized = False
 
 
-# Module-level singleton instance for zero-allocation recurring queries
-_MONITOR_INSTANCE = SystemMonitor()
+_MONITOR_INSTANCE: Optional[SystemMonitor] = None
+
+
+def get_system_monitor() -> SystemMonitor:
+    """Returns the module singleton SystemMonitor."""
+    global _MONITOR_INSTANCE
+    if _MONITOR_INSTANCE is None:
+        _MONITOR_INSTANCE = SystemMonitor()
+    return _MONITOR_INSTANCE
 
 
 def get_memory_status() -> Dict[str, Any]:
+    """Module-level helper to query current hardware memory status."""
+    return get_system_monitor().get_memory_status()
+
+
+def get_gpu_vram_gb() -> Optional[float]:
     """
-    Public API: Returns the current memory status dictionary.
-    Guaranteed schema:
-        {"device_name": str, "total_gb": float, "used_gb": float, "free_gb": float, "is_gpu": bool}
+    Returns the physical dedicated GPU VRAM in GB via NVML.
+    Returns None if no dedicated GPU is available (NEVER Host System-RAM).
     """
-    return _MONITOR_INSTANCE.get_memory_status()
+    return get_system_monitor().get_gpu_vram_gb()
 
 
 def calculate_token_budget(
@@ -284,6 +322,7 @@ class SystemMonitorThread(QThread):
         super().__init__(parent)
         self.ollama_host = ollama_host.rstrip("/")
         self.interval = max(0.5, float(interval))
+        self.monitor = get_system_monitor()
         self._running = True
 
     def run(self) -> None:

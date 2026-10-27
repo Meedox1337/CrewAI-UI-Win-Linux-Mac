@@ -32,6 +32,7 @@ from core.locales import (
 )
 from core.model_knowledge import (
     can_use_tools,
+    evaluate_vram_status,
     get_model_specs,
     has_thinking_mode,
 )
@@ -275,13 +276,14 @@ class PipelineCard(QFrame):
         self.lbl_model.setToolTip(f"Modell: {self.model_name}")
         mv_layout.addWidget(self.lbl_model)
 
+        vram_status = evaluate_vram_status(self.vram_gb)
         self.lbl_vram = QLabel(f"~{self.vram_gb:.1f} GB")
         self.lbl_vram.setStyleSheet(
-            "background-color: #0f172a; color: #94a3b8; font-size: 10px; font-weight: bold; "
-            "padding: 3px 6px; border-radius: 4px; border: 1px solid #334155;"
+            f"background-color: {vram_status['bg']}; color: {vram_status['fg']}; font-size: 10px; font-weight: bold; "
+            f"padding: 3px 6px; border-radius: 4px; border: 1px solid {vram_status['border']};"
         )
         self.lbl_vram.setToolTip(
-            f"Geschätzter VRAM-Bedarf für {self.model_name}: ~{self.vram_gb:.1f} GB"
+            f"{vram_status['tooltip']} (Bedarf: ~{self.vram_gb:.1f} GB)"
         )
         mv_layout.addWidget(self.lbl_vram)
         mv_layout.addStretch()

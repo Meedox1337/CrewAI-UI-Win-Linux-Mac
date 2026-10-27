@@ -545,6 +545,15 @@ class CrewMainWindow(QMainWindow):
 
     def _on_vram_updated(self, used_gb: float, total_gb: float, percent: int) -> None:
         self.lbl_vram.setText(f"VRAM: {used_gb:.1f} / {total_gb:.1f} GB ({percent}%)")
+        if hasattr(self, "model_pool") and self.model_pool is not None:
+            is_gpu = False
+            if hasattr(self, "monitor_thread") and hasattr(self.monitor_thread, "monitor") and self.monitor_thread.monitor:
+                mem = self.monitor_thread.monitor.get_memory_status()
+                is_gpu = bool(mem.get("is_gpu", False))
+            if is_gpu:
+                self.model_pool.set_gpu_vram(total_gb)
+            else:
+                self.model_pool.set_gpu_vram(None)
 
     def _on_result_accepted(self) -> None:
         """
