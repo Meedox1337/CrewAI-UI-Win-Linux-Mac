@@ -89,6 +89,39 @@ class SingleModelPullWorker(QThread):
             self.finished_pull.emit(False, self.model_name, str(exc))
 
 
+class ModelDeleteWorker(QThread):
+    """
+    Background worker thread deleting an Ollama model from local disk storage
+    without blocking the PyQt GUI event loop.
+    """
+
+    finished_delete = pyqtSignal(bool, str, str)  # success, model_name, error_message
+
+    def __init__(
+        self,
+        client: OllamaClient,
+        model_name: str,
+        parent: Optional[QObject] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.client = client
+        self.model_name = model_name
+
+    def run(self) -> None:
+        try:
+            ok = self.client.delete_model(self.model_name)
+            if ok:
+                self.finished_delete.emit(True, self.model_name, "")
+            else:
+                self.finished_delete.emit(
+                    False,
+                    self.model_name,
+                    "Ollama DELETE API lieferte einen Fehlercode zurück.",
+                )
+        except Exception as exc:
+            self.finished_delete.emit(False, self.model_name, str(exc))
+
+
 class ModelUpdateCheckWorker(QThread):
     """
     Background worker thread checking remote Ollama registry manifests
@@ -182,6 +215,7 @@ class ModelPoolWidget(QFrame):
             self.gpu_vram_gb = None
         self._update_check_worker: Optional[ModelUpdateCheckWorker] = None
         self._active_pull_workers: List[SingleModelPullWorker] = []
+        self._active_delete_workers: List[ModelDeleteWorker] = []
         self.is_pulling: bool = False
         self.pull_worker: Optional[ModelPullWorker] = None
         self.model_list_worker: Optional[ModelListWorker] = None
@@ -321,9 +355,9 @@ class ModelPoolWidget(QFrame):
         self.lbl_hdr_role.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold;")
         legend_layout.addWidget(self.lbl_hdr_role)
 
-        # Spalte 6: Aktions-Button (~145px, zentriert)
+        # Spalte 6: Aktions-Buttons (~185px, zentriert)
         self.lbl_hdr_action = QLabel("Aktion" if self.lang == "de" else "Action")
-        self.lbl_hdr_action.setFixedWidth(145)
+        self.lbl_hdr_action.setFixedWidth(185)
         self.lbl_hdr_action.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_hdr_action.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold;")
         legend_layout.addWidget(self.lbl_hdr_action)
@@ -476,22 +510,50 @@ class ModelPoolWidget(QFrame):
                 lbl_role.setToolTip(role_badge["tooltip"])
                 r_layout.addWidget(lbl_role)
 
-                # Spalte 7: Aktions-Button (feste Breite ~145px)
+                # Spalte 7: Aktions-Zelle (Container mit Add- und Delete-Button, feste Breite 185px)
+                action_box = QWidget()
+                action_box.setFixedWidth(185)
+                act_layout = QHBoxLayout(action_box)
+                act_layout.setContentsMargins(0, 0, 0, 0)
+                act_layout.setSpacing(4)
+
                 btn_add = QPushButton("➕ " + t("pipeline_btn_add", lang=self.lang))
-                btn_add.setFixedWidth(145)
                 btn_add.setStyleSheet(
                     "QPushButton { background-color: #2563eb; color: #ffffff; border-radius: 3px; "
                     "padding: 4px 8px; font-weight: bold; font-size: 11px; } "
-                    "QPushButton:hover { background-color: #1d4ed8; }"
+                    "QPushButton:hover { background-color: #1d4ed8; } "
+                    "QPushButton:disabled { background-color: #1e293b; color: #64748b; }"
                 )
                 btn_add.setToolTip(f"'{name}' als neuen Agenten zur Pipeline hinzufügen")
                 btn_add.clicked.connect(lambda checked, n=name: self.model_add_requested.emit(n))
-                r_layout.addWidget(btn_add)
+                act_layout.addWidget(btn_add, stretch=1)
+
+                btn_delete = QPushButton("🗑️")
+                btn_delete.setFixedWidth(36)
+                btn_delete.setStyleSheet(
+                    "QPushButton { background-color: #7f1d1d; color: #fca5a5; border: 1px solid #991b1b; "
+                    "border-radius: 3px; padding: 4px 6px; font-weight: bold; font-size: 11px; } "
+                    "QPushButton:hover { background-color: #991b1b; color: #ffffff; border-color: #dc2626; } "
+                    "QPushButton:disabled { background-color: #331d1d; color: #64748b; border-color: #451a1a; }"
+                )
+                btn_delete.setToolTip(
+                    f"Modell '{name}' dauerhaft von der Festplatte löschen"
+                    if self.lang == "de"
+                    else f"Permanently delete model '{name}' from disk"
+                )
+                btn_delete.clicked.connect(
+                    lambda checked, n=name, bd=btn_delete, ba=btn_add: self._on_delete_model_clicked(n, bd, ba)
+                )
+                act_layout.addWidget(btn_delete)
+
+                r_layout.addWidget(action_box)
 
                 self._model_rows[name] = {
                     "btn_update": btn_update,
                     "lbl_size": lbl_size,
                     "lbl_vram": lbl_vram,
+                    "btn_add": btn_add,
+                    "btn_delete": btn_delete,
                     "model": model,
                 }
 
@@ -600,27 +662,11 @@ class ModelPoolWidget(QFrame):
             )
 
     def _show_pull_help(self) -> None:
-        """Displays guidance for Ollama model names and directories."""
-        msg = (
-            "<b>Ollama Modell-Installation:</b><br><br>"
-            "Gib den genauen Modellbezeichner ein, z. B.:<br>"
-            "&bull; <code>qwen2.5-coder:14b</code> (Hervorragend für Code)<br>"
-            "&bull; <code>deepseek-r1:8b</code> (Reasoning & Logik)<br>"
-            "&bull; <code>llama3.2:3b</code> (Kompakt & schnell)<br><br>"
-            "<i>Hinweis: Ohne Tag wird automatisch ':latest' angehängt. Der Befehl 'ollama pull' ist nicht nötig.</i>"
-            if self.lang == "de"
-            else "<b>Ollama Model Installation:</b><br><br>"
-            "Enter exact model tag, e.g.:<br>"
-            "&bull; <code>qwen2.5-coder:14b</code> (Great for code)<br>"
-            "&bull; <code>deepseek-r1:8b</code> (Reasoning & architecture)<br>"
-            "&bull; <code>llama3.2:3b</code> (Fast & compact)<br><br>"
-            "<i>Prefix 'ollama pull' is not required.</i>"
-        )
-        QMessageBox.information(
-            self,
-            "Modell-Installation & Info" if self.lang == "de" else "Model Pull Info",
-            msg,
-        )
+        """Displays guidance for Ollama model names and hardware recommendations via CockpitHelpDialog."""
+        from ui.help_dialog import CockpitHelpDialog
+
+        dlg = CockpitHelpDialog(parent=self.window(), lang=self.lang)
+        dlg.exec()
 
     def _start_update_checks(self) -> None:
         """Starts asynchronous check against Ollama registry for each installed model."""
@@ -836,11 +882,95 @@ class ModelPoolWidget(QFrame):
                 )
                 lbl_vram.setToolTip(vram_status["tooltip"])
 
+    def _on_delete_model_clicked(
+        self,
+        model_name: str,
+        btn_delete: QPushButton,
+        btn_add: QPushButton,
+    ) -> None:
+        """Prompts user for confirmation before permanently deleting a model from disk."""
+        title = "Modell löschen bestätigen" if self.lang == "de" else "Confirm Model Deletion"
+        msg = (
+            f"Möchten Sie das Modell '{model_name}' wirklich dauerhaft von der Festplatte löschen?"
+            if self.lang == "de"
+            else f"Do you really want to permanently delete the model '{model_name}' from disk?"
+        )
+        reply = QMessageBox.question(
+            self,
+            title,
+            msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._start_model_deletion(model_name, btn_delete, btn_add)
+
+    def _start_model_deletion(
+        self,
+        model_name: str,
+        btn_delete: QPushButton,
+        btn_add: QPushButton,
+    ) -> None:
+        """Starts asynchronous deletion of a model from disk."""
+        btn_delete.setEnabled(False)
+        btn_add.setEnabled(False)
+        btn_delete.setText("⏳")
+        btn_delete.setToolTip("Lösche Modell..." if self.lang == "de" else "Deleting model...")
+
+        worker = ModelDeleteWorker(self.ollama_client, model_name, parent=self)
+        worker.finished_delete.connect(
+            lambda ok, name, err, bd=btn_delete, ba=btn_add: self._on_model_deleted(ok, name, err, bd, ba)
+        )
+        self._active_delete_workers.append(worker)
+        worker.finished.connect(lambda w=worker: self._cleanup_delete_worker(w))
+        worker.start()
+
+    def _on_model_deleted(
+        self,
+        success: bool,
+        model_name: str,
+        error_msg: str,
+        btn_delete: QPushButton,
+        btn_add: QPushButton,
+    ) -> None:
+        """Handles completion of asynchronous model deletion."""
+        if success:
+            log_msg = f"[INFO] Modell '{model_name}' erfolgreich von der Festplatte gelöscht."
+            self.log_emitted.emit(log_msg, "INFO")
+            # Automatically reload installed models so the deleted model disappears
+            QTimer.singleShot(150, self.load_installed_models)
+        else:
+            btn_delete.setEnabled(True)
+            btn_add.setEnabled(True)
+            btn_delete.setText("🗑️")
+            btn_delete.setToolTip(
+                f"Modell '{model_name}' dauerhaft von der Festplatte löschen"
+                if self.lang == "de"
+                else f"Permanently delete model '{model_name}' from disk"
+            )
+            err_text = f"[FEHLER] Löschen von '{model_name}' fehlgeschlagen: {error_msg}"
+            self.log_emitted.emit(err_text, "ERROR")
+            QMessageBox.critical(
+                self,
+                "Löschfehler" if self.lang == "de" else "Deletion Error",
+                f"Modell '{model_name}' konnte nicht gelöscht werden:\n{error_msg}"
+                if self.lang == "de"
+                else f"Could not delete model '{model_name}':\n{error_msg}",
+            )
+
+    def _cleanup_delete_worker(self, worker: ModelDeleteWorker) -> None:
+        if worker in self._active_delete_workers:
+            self._active_delete_workers.remove(worker)
+
     def stop(self) -> None:
-        """Terminates active pull, check, and list threads cleanly."""
+        """Terminates active pull, check, delete, and list threads cleanly."""
         if self._update_check_worker is not None and self._update_check_worker.isRunning():
             self._update_check_worker.stop()
             self._update_check_worker.wait(200)
+        for w in list(self._active_delete_workers):
+            if w.isRunning():
+                w.terminate()
+        self._active_delete_workers.clear()
         for w in list(self._active_pull_workers):
             if w.isRunning():
                 w.terminate()

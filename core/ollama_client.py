@@ -380,6 +380,56 @@ class OllamaClient(QObject):
                 logger.debug("Silently caught error checking update for %s: %s", model_name, exc)
             return False
 
+    def delete_model(self, model_name: str, timeout: float = 10.0) -> bool:
+        """
+        Deletes a model from the local Ollama storage.
+        Sends a DELETE request to /api/delete with JSON body {"name": model_name}.
+        Returns True if deletion succeeded (HTTP 200), False otherwise.
+        """
+        clean_name = model_name.strip()
+        if not clean_name:
+            return False
+
+        url = f"{self.host}/api/delete"
+        payload = {"name": clean_name}
+        try:
+            log_http_event(url, "DELETE", payload=payload)
+            response = requests.delete(
+                url,
+                json=payload,
+                timeout=(DEFAULT_CONNECT_TIMEOUT, timeout),
+            )
+            log_http_event(url, "DELETE", payload=payload, status_code=response.status_code)
+            if response.status_code == 200:
+                logger.info("Successfully deleted model '%s' via Ollama API.", clean_name)
+                self.log_emitted.emit(
+                    f"[INFO] Modell '{clean_name}' erfolgreich von der Festplatte gelöscht.",
+                    "INFO",
+                )
+                return True
+            else:
+                logger.warning(
+                    "Failed to delete model '%s': status code %s (%s)",
+                    clean_name,
+                    response.status_code,
+                    response.text,
+                )
+                self.log_emitted.emit(
+                    f"[FEHLER] Löschen von '{clean_name}' fehlgeschlagen (HTTP {response.status_code}).",
+                    "ERROR",
+                )
+                return False
+        except Exception as exc:
+            if is_debug():
+                logger.error("Exception deleting model '%s': %s", clean_name, exc, exc_info=True)
+            else:
+                logger.error("Exception deleting model '%s': %s", clean_name, exc)
+            self.log_emitted.emit(
+                f"[FEHLER] Verbindungsfehler beim Löschen von '{clean_name}': {exc}",
+                "ERROR",
+            )
+            return False
+
 
 # Module-level convenience functions matching specification
 
