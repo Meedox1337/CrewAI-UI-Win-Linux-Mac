@@ -1,121 +1,129 @@
+**Language / Sprache:** [🇬🇧 English](README.md) | [🇩🇪 Deutsch](README.de.md)
+
+---
+
 # Local Crew Cockpit (PyQt6)
 
-> **Produktionsreife, lokale Multi-Agenten-Orchestrierung ohne Cloud-Zwang.**  
+> **Production-ready, local multi-agent orchestration without cloud lock-in.**  
 > [![GitHub Profile](https://img.shields.io/badge/Developer-Medox1337-1e293b?style=flat-square&logo=github&logoColor=white)](https://github.com/Meedox1337?tab=repositories)
 
 ---
 
-## 1. Urheberschaft & Technologie-Stack
+## 1. Authorship & Technology Stack
 
-* **UI & Architektur-Konzeption:** [**Medox1337**](https://github.com/Meedox1337?tab=repositories)  
-  Vollständig entkoppelte, modulare PyQt6/PySide6 Benutzeroberfläche mit reaktivem Multi-Threading, tabellarischem Modell-Pool, Pipeline-Karten und unterbrechungsfreier Live-Hardwareüberwachung.
+* **UI & Architecture Design:** [**Medox1337**](https://github.com/Meedox1337?tab=repositories)  
+  Fully decoupled, modular PyQt6/PySide6 desktop cockpit with responsive multi-threading, tabular model pool, pipeline cards, and non-blocking real-time hardware telemetry.
 * **Core Agent Framework:** **[CrewAI](https://github.com/crewAIInc/crewAI)**  
-  Strukturierte Rollenaufteilung (`Agent`), zielgerichtete Aufgabenverteilung (`Task`) und deterministische Pipeline-Steuerung mit synchroner und asynchroner Ausführung.
-* **Lokale Inferenz & Modell-Backend:** **[Ollama](https://github.com/ollama/ollama)**  
-  Vollständig lokale Modell-Inferenz über standardisierte REST/HTTP-Endpunkte (`/api/tags`, `/api/pull`, `/api/chat`, `/api/generate`). Garantierte Datenhoheit und Offline-Betrieb.
-* **Echtzeit-Hardwareüberwachung:** **NVIDIA Management Library (NVML / pynvml)**  
-  Direktes Polling von physischem Gesamt-, Belegungs- und freiem VRAM sowie GPU-Auslastung im Hintergrund-Thread ohne Beeinträchtigung des Qt-Event-Loops.
+  Structured role delegation (`Agent`), goal-driven task assignment (`Task`), and deterministic pipeline control with synchronous and asynchronous execution.
+* **Local Inference & Model Backend:** **[Ollama](https://github.com/ollama/ollama)**  
+  Purely local LLM inference over standardized REST/HTTP endpoints (`/api/tags`, `/api/pull`, `/api/chat`, `/api/generate`). 100% data sovereignty and offline operation.
+* **Real-Time Hardware Telemetry:** **NVIDIA Management Library (NVML / pynvml)**  
+  Direct polling of physical total, used, and free VRAM as well as GPU utilization in dedicated background threads without impacting the Qt event loop.
 
 ---
 
-## 2. Funktionsweise & Kernarchitektur
+## 2. Core Architecture & Workflow (How It Works)
 
-### Multi-Model-Pipeline (Heterogenes Spezialisten-Team)
-Das Cockpit bricht mit dem Dogma homogener Agenten-Setups: Jede Stufe der sequentiellen Pipeline kann mit einem dedizierten, auf die jeweilige Aufgabe spezialisierten Modell belegt werden:
-* **Architektur, Planung & Code-Audit:** Reasoning-Modelle (z. B. `deepseek-r1:14b`, `deepseek-r1:32b`, `deepseek-r1:70b`) analysieren Anforderungen, erkennen Edge-Cases und erstellen Architekturpläne.
-* **Code-Generierung & Refactoring:** Programmierspezialisten (z. B. `qwen2.5-coder:14b`, `qwen2.5-coder:32b`, `starcoder2`) setzen die Architektur präzise in sauberen Code um.
-* **Recherche, Dokumentation & Test:** Sprachmodelle mit starker Allgemeinbildung (z. B. `mistral-nemo:12b`, `llama3.3:70b`, `llama3.1:8b`) übernehmen Dokumentation, Testfall-Synthese und Web-Recherche.
+### Multi-Model Pipeline (Heterogeneous Specialist Team)
+The cockpit breaks away from homogeneous single-model setups: Each stage in the sequential pipeline can be assigned a dedicated local LLM specialized for the task at hand:
+* **Architecture, Planning & Code Audit:** Reasoning models (e.g., `deepseek-r1:14b`, `deepseek-r1:32b`, `deepseek-r1:70b`) analyze requirements, identify edge cases, and formulate architectural blueprints.
+* **Code Generation & Refactoring:** Programming powerhouses (e.g., `qwen2.5-coder:14b`, `qwen2.5-coder:32b`, `starcoder2`) implement features and patches cleanly into source code.
+* **Research, Documentation & QA:** Broad-capability general models (e.g., `mistral-nemo:12b`, `llama3.3:70b`, `llama3.1:8b`) handle documentation, test generation, and web research.
 
-### Dynamisches Kontextfenster (Hardware-Adaptive `num_ctx`)
-Anstelle starrer oder willkürlicher Begrenzungen (wie standardmäßigen 2k- oder 4k-Tokens) kalkuliert das Cockpit vor jedem Workflow dynamisch das maximal sichere Kontextfenster:
-1. Ermittlung des physisch verbauten GPU-VRAMs via NVML (`vram_total_gb`).
-2. Bestimmung des speicherintensivsten Modells im Team (`max_model_size_gb`).
-3. Berechnung des verbleibenden Puffers für KV-Cache und GPU-Headroom:
-   $$\text{Headroom} = \text{VRAM}_{\text{total}} - \text{Modellgröße} - \text{Sicherheitsreserve (2.5 GB)}$$
-4. Automatische hardware-agnostische Skalierung:
-   * **Spar- & Mid-Range-Hardware (< 16 GB VRAM):** Konservative Kontextfenster von 4.096 bis 16.384 Tokens zur Vermeidung von CUDA Out-of-Memory-Crashes.
-   * **High-End-Hardware (24 GB bis 32 GB VRAM, z. B. RTX 3090/4090/5090):** Automatische Freigabe von 65.536 bis 131.072 Tokens (`64k` / `128k`), die bei CrewAI-Initialisierung explizit als `num_ctx` an Ollama übergeben werden.
+### Dynamic Context Window (Hardware-Adaptive `num_ctx`)
+Instead of rigid or arbitrary limits (such as standard 2k or 4k token windows), the cockpit dynamically computes the maximum safe context window prior to workflow execution:
+1. Detects physically installed GPU VRAM via NVML (`vram_total_gb`).
+2. Identifies the most memory-intensive model in the selected team (`max_model_size_gb`).
+3. Computes the remaining safe memory buffer for KV-cache and GPU headroom:
+   $$\text{Headroom} = \text{VRAM}_{\text{total}} - \text{Model Size} - \text{Safety Buffer (2.5 GB)}$$
+4. Hardware-agnostic allocation:
+   * **Entry- & Mid-Range Hardware (< 16 GB VRAM):** Conservative context windows between 4,096 and 16,384 tokens to prevent CUDA Out-of-Memory crashes.
+   * **High-End Hardware (24 GB to 32 GB VRAM, e.g., RTX 3090/4090/5090):** Automatically unlocks 65,536 to 131,072 tokens (`64k` / `128k`), explicitly passed to Ollama via `num_ctx` during LLM initialization.
 
 ### Tool-Calling & Auto-Execute Sandbox
-Agenten interagieren direkt und sicher mit dem Projekt-Workspace:
-* **Isolierter Workspace-Schutz:** Alle Schreib- und Patch-Operationen (`file_write_tool`, `file_patch_tool`, `file_grep_tool`, `file_read_tool`) validieren Zielpfade über `os.path.commonpath`. Jeder Zugriff außerhalb des freigegebenen Workspace-Ordners wird mit einer Sicherheitsblockade abgewiesen.
-* **Physisches Patching:** Präzise Ersetzung von Codeblöcken via `file_patch_tool` minimiert Token-Verbrauch gegenüber vollständigen Dateineuschreibungen.
-* **Fallback-Parsing für Text-Toolcalls:** Gibt ein Modell (insbesondere reine Reasoning-Modelle) Tool-Aufrufe fälschlicherweise als JSON-Textblock (`{"name": "file_write_tool", ...}`) anstelle eines nativen API-Tool-Calls aus, erkennt der Runner dieses Verhalten automatisch, extrahiert die Parameter und führt die Dateioperation physisch im Workspace aus.
+Agents interact directly and safely with the project workspace:
+* **Isolated Workspace Sandbox:** All write and patch operations (`file_write_tool`, `file_patch_tool`, `file_grep_tool`, `file_read_tool`) validate target paths via `os.path.commonpath`. Any unauthorized path traversal outside the project directory is blocked immediately.
+* **Surgical Patching:** Targeted code snippet replacements via `file_patch_tool` significantly reduce token consumption compared to full file rewrites.
+* **Fallback Parsing for Text Tool-Calls:** When models (especially reasoning models) emit tool invocations as raw JSON text blocks (`{"name": "file_write_tool", ...}`) instead of native API tool-calls, the runner automatically extracts parameters and physically executes the file operation inside the workspace.
 
-### Resource Lifecycle & Zero-Leak-Reset
-Um VRAM-Fragmentierung und persistente Speicherblockaden nach Abschluss oder Abbruch einer Pipeline zu verhindern:
-* Nach Pipeline-Ende werden alle Ollama-Verbindungen ordnungsgemäß geschlossen.
-* Gezielter Aufruf mit `keep_alive: 0` erzwingt bei Bedarf die sofortige Freigabe des VRAMs durch den Ollama-Daemon.
-* Worker-Threads werden deterministisch beendet (`quit()` mit Timeout-Fallback auf `terminate()`), UI-Buttons sofort wieder entsperrt.
+### Resource Lifecycle & Zero-Leak Reset
+To prevent persistent VRAM allocation or memory fragmentation after task completion or cancellation:
+* All active Ollama connections and streams are properly finalized upon pipeline completion.
+* An explicit unload with `keep_alive: 0` can be triggered to release VRAM back to the OS.
+* Worker threads are cleanly terminated (`quit()` with a timeout fallback to `terminate()`), resetting UI buttons instantly.
 
 ---
 
-## 3. Installation & Schnellstart
+## 3. Installation & Quickstart
 
-### Systemvoraussetzungen
-* **Betriebssystem:** Windows 10/11 (64-Bit), Linux oder macOS.
-* **Python:** Python 3.10 oder 3.11 empfohlen.
-* **GPU & Treiber:** NVIDIA-Grafikkarte mit aktuellem NVIDIA-Treiber (für NVML VRAM-Tracking).
-* **Ollama:** Installiert und im Hintergrund aktiv ([ollama.com](https://ollama.com)).
+### Prerequisites
+* **Operating System:** Windows 10/11 (64-bit), Linux, or macOS.
+* **Python:** Python 3.10 or 3.11 recommended.
+* **GPU & Drivers:** NVIDIA GPU with up-to-date NVIDIA drivers (for NVML VRAM telemetry).
+* **Ollama:** Installed and running in the background ([ollama.com](https://ollama.com)).
 
-### Schritt-für-Schritt Setup
+### Step-by-Step Setup
 
-1. **Repository klonen oder Projektordner öffnen:**
+1. **Clone the repository or open project directory:**
    ```bash
    git clone https://github.com/Meedox1337/LocalCrewCockpit.git
    cd LocalCrewCockpit
    ```
 
-2. **Virtuelle Python-Umgebung anlegen & aktivieren:**
+2. **Create & activate a virtual Python environment:**
    ```bash
    # Windows PowerShell / CMD
    python -m venv venv
    .\venv\Scripts\activate
+
+   # Linux / macOS
+   python3 -m venv venv
+   source venv/bin/activate
    ```
 
-3. **Abhängigkeiten installieren:**
+3. **Install dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
 
-4. **Ollama starten:**
-   Stelle sicher, dass der lokale Ollama-Server läuft:
+4. **Start the Ollama daemon:**
+   Ensure the local Ollama instance is active:
    ```bash
    ollama serve
    ```
-   *(Empfohlene Modelle vorab laden, z. B. `ollama pull qwen2.5-coder:14b` und `ollama pull deepseek-r1:14b`)*
+   *(Pre-pull recommended models, e.g., `ollama pull qwen2.5-coder:14b` and `ollama pull deepseek-r1:14b`)*
 
-5. **Local Crew Cockpit starten:**
+5. **Launch the Local Crew Cockpit:**
    ```bash
    python main.py
    ```
 
 ---
 
-## 4. Streaming-Tracking & Modell-Management
+## 4. Streaming Tracking & Model Management
 
-Das Cockpit verfügt über ein voll-integriertes Modell-Pool-Management in Zone 1:
-* **Hintergrund-Update-Check:** Vergleicht lokale SHA256-Manifest-Digests via HEAD/GET mit der Ollama-Registry (`https://registry.ollama.ai/v2/...`). Ist eine neuere Version verfügbar, wechselt die Update-Schaltfläche auf `⚡ Update verfügbar`.
-* **Live-Streaming-Tracking:** Beim Download/Update wird der JSON-Stream zeilenweise geparst:
-  * In der UI: Button wechselt auf `⏳ 45% (10.0 GB)`.
-  * Im Terminal: Interaktiver Fortschrittsbalken mit Geschwindigkeits- und Restzeitanzeige:
+The cockpit features an integrated Model Pool management system in Zone 1:
+* **Background Remote Update Check:** Compares local SHA256 digests via HEAD/GET requests against the Ollama Registry (`https://registry.ollama.ai/v2/...`). When an update is detected, the button displays `⚡ Update available`.
+* **Live Streaming Progress:** JSON chunk streams are parsed in real time during downloads:
+  * In the UI: Row button dynamically updates to `⏳ 45% (10.0 GB)`.
+  * In Terminal: Interactive console progress bar with transfer rate and ETA:
     ```text
     [PULL] qwen2.5-coder:14b:  45%|████▍     | 10.0G/22.2G [01:23<01:45, 115MB/s]
     ```
-  * Im Live-Log: Regelmäßige Zwischenstände alle 10% sowie Abschlussmeldung `[SUCCESS] Modell '...' vollständig geladen und einsatzbereit.`
+  * In Live Log: Periodic progress logs every 10% and completion banner `[SUCCESS] Modell '...' vollständig geladen und einsatzbereit.`
 
 ---
 
-## 5. Entwickler- & Debugging-Guide (Py-Debugging & CLI)
+## 5. Developer & Debugging Guide (Py-Debugging & CLI)
 
-Für Entwickler, Prompt-Ingenieure und System-Fehlersuche bietet das Cockpit einen dedizierten, hochdetaillierten Debug-Modus.
+For developers, prompt engineers, and troubleshooting, the cockpit provides a dedicated, comprehensive debug mode.
 
-### Aktivierung des Debug-Modus
-Starte das Cockpit über das CLI-Flag `--debug`:
+### Activating Debug Mode
+Launch the cockpit with the CLI flag `--debug`:
 ```bash
 python main.py --debug
 ```
-Alternativ über die Umgebungsvariable `COCKPIT_DEBUG=1`:
+Or set the environment variable `COCKPIT_DEBUG=1`:
 ```powershell
 # PowerShell
 $env:COCKPIT_DEBUG="1"
@@ -124,63 +132,68 @@ python main.py
 # CMD
 set COCKPIT_DEBUG=1
 python main.py
+
+# Linux / macOS
+export COCKPIT_DEBUG=1
+python3 main.py
 ```
 
-Beim Start signalisiert das Cockpit den aktiven Modus:
+On startup, the cockpit prints an explicit confirmation:
 ```text
 [DEBUG-MODE AKTIV] Detaillierte Fehlerprotokollierung eingeschaltet.
 ```
 
-### Diagnose & Logging-Transparenz
-Im Debug-Modus protokolliert das System in Echtzeit auf der Konsole:
-1. **Ollama HTTP REST-Events:**
-   Ausgabe aller Request-URLs, Headers, Payloads (`/api/pull`, `/api/tags`, `/api/show`, `/api/delete`) und Chunk-Streams.
-2. **Tool-Payloads & Sandboxing:**
-   Vollständige Erfassung der an Werkzeuge übergebenen Argumente (`file_path`, `content_len`, `pattern`) sowie deren exakte Rückgabewerte.
+### Diagnostics & Real-Time Telemetry
+In debug mode, the console outputs:
+1. **Ollama HTTP REST Events:**
+   Inspects all request URLs, headers, payloads (`/api/pull`, `/api/tags`, `/api/show`, `/api/delete`), and chunk responses.
+2. **Tool Payloads & Sandboxing:**
+   Full capture of arguments passed into tools (`file_path`, `content_len`, `pattern`) as well as their return values.
 3. **CrewAI Step & Callback Tracking:**
-   Schritt-für-Schritt-Protokollierung jedes Task-Zustandswechsels und Gedankengangs.
-4. **Vollständige Python-Tracebacks:**
-   Bei Ausnahmen in Threads, REST-Aufrufen oder Tool-Ausführungen wird der gesamte Callstack mit Dateinamen und Zeilennummern ausgegeben.
+   Granular logging of task state changes, thoughts, and token usage increments.
+4. **Complete Python Tracebacks:**
+   Any unhandled exception in background worker threads or tool calls prints the complete call stack with file names and line numbers.
 
-### Fehlerbehebung & Best Practices
+### Troubleshooting & Best Practices
 
-| Symptom / Problem | Ursache | Lösung |
+| Symptom / Problem | Root Cause | Solution |
 | :--- | :--- | :--- |
-| **`Connection refused` / Offline** | Ollama-Dienst läuft nicht auf Port 11434. | Führe `ollama serve` in einem separaten Terminal aus und klicke auf `Modelle neu laden`. |
-| **`CUDA out of memory`** | Das gewählte Modell überschreitet den realen VRAM zusammen mit dem KV-Cache. | Wähle ein kleineres Quantisierungs-Level (z. B. `q4_K_M` statt `q8_0`) oder reduziere die Anzahl gleichzeitiger Hintergrundprogramme. |
-| **Agent simuliert Tool-Calls als Text** | Kleinere Modelle (< 7B) verstehen native Function-Calling-Tokens nicht immer zuverlässig. | Das integrierte Fallback-System fängt den Text ab und führt ihn aus. Für beste native Ergebnisse wird `qwen2.5-coder:14b` oder höher empfohlen. |
-| **NVML Warning beim Start** | Deprecation-Hinweis älterer `pynvml`-Pakete. | Unkritisch; wird vom Cockpit intern abgefangen. Optional auf `nvidia-ml-py` aktualisieren. |
+| **`Connection refused` / Offline** | Ollama daemon is not running on port 11434. | Start `ollama serve` in a separate terminal and click `Reload Models`. |
+| **`CUDA out of memory`** | Model weights combined with KV-cache exceed physical GPU VRAM. | Choose a more compact quantization (e.g. `q4_K_M` instead of `q8_0`) or close memory-heavy background applications. |
+| **Agent simulates tool-calls as text** | Smaller models (< 7B) may not reliably emit native function-calling tokens. | The built-in text fallback parser captures and executes the file call automatically. For native function calling, `qwen2.5-coder:14b` or higher is recommended. |
+| **NVML deprecation warning** | Warning message from older `pynvml` packages. | Harmless; caught internally by the system monitor. Optionally upgrade to `nvidia-ml-py`. |
 
 ---
 
-## 6. Projektstruktur
+## 6. Project Structure
 
 ```text
 CrewAI/
 ├── core/
-│   ├── crew_runner.py        # CrewAI Orchestrierung, Task-Queue & Hardware-Kontext-Kalkulation
-│   ├── logger.py             # Zentrales Logging-System (--debug & Payload-Tracing)
-│   ├── model_knowledge.py    # VRAM-Schätzungen, Capability- & Rollen-Matrix
-│   ├── ollama_client.py      # Asynchroner REST-Client, Registry-Checks & Download-Streamer
-│   ├── system_monitor.py     # NVML GPU- & VRAM-Monitor im Hintergrund-Thread
-│   ├── tools.py              # Sandbox-gesicherte Datei-, Patch- & Suchwerkzeuge
-│   └── locales.py            # Lokalisierungs-Strings (Deutsch & Englisch)
+│   ├── crew_runner.py        # CrewAI orchestration, task queue & hardware context calculation
+│   ├── logger.py             # Central logging engine (--debug & payload tracing)
+│   ├── model_knowledge.py    # VRAM estimates, capability & role matrix
+│   ├── ollama_client.py      # Async REST client, registry checks & streaming pull
+│   ├── system_monitor.py     # NVML GPU & VRAM background monitor thread
+│   ├── tools.py              # Sandboxed file, patch, grep & web search tools
+│   └── locales.py            # Localization dictionaries (DE / EN)
 ├── ui/
 │   ├── components/
-│   │   ├── model_pool_widget.py   # Zone 1: Tabellarischer Modell-Pool & Update-Status
-│   │   ├── pipeline_widget.py     # Zone 2: Rollenbasierte Agenten-Pipeline & Reordering
-│   │   ├── workspace_widget.py    # Zone 3: Aufgabenprompt & Workspace-Dateibaum
-│   │   ├── system_dock.py         # Hardware-Dock (VRAM, RAM, CPU-Bargraphen)
-│   │   └── log_dock.py            # Live-Aktivitätslog & Terminalausgabe
-│   ├── main_window.py        # Schlanker Koordinator & Layout-Assembler
-│   └── pipeline_card.py      # Einzelne Agenten-Karte mit Live-Gedankenstream
-├── main.py                   # Applikations-Einstiegspunkt & Theme-Initialisierung
-├── requirements.txt          # Python-Paketabhängigkeiten
-└── README.md                 # Projektdokumentation & Architektur-Guide
+│   │   ├── model_pool_widget.py   # Zone 1: Tabular model pool & update status
+│   │   ├── pipeline_widget.py     # Zone 2: Role-based agent pipeline & reordering
+│   │   ├── workspace_widget.py    # Zone 3: Master task prompt & workspace file tree
+│   │   ├── system_dock.py         # Hardware telemetry dock (VRAM, RAM, CPU)
+│   │   └── log_dock.py            # Live activity log & terminal console
+│   ├── main_window.py        # Main PyQt6 window coordinator
+│   └── pipeline_card.py      # Agent card component with live thought drawer
+├── main.py                   # Application entry point & theme initialization
+├── requirements.txt          # Python package dependencies
+├── README.md                 # English main documentation
+└── README.de.md              # German documentation
 ```
 
 ---
 
-## 7. Lizenz & Nutzungsbestimmungen
+## 7. License & Usage
 
-Entwickelt für den transparenten, datenschutzkonformen und hochperformanten Einsatz lokaler Sprachmodelle in professionellen Software-Entwicklungsworkflows. Freie Nutzung im Rahmen lokaler Forschung und Entwicklung.
+Designed for transparent, privacy-first, high-performance orchestration of local large language models in modern software development workflows. Free for local research, prototyping, and development.
